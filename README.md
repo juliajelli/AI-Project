@@ -15,7 +15,7 @@ any kind of platform (tested with `aarch64`, `x86_64` and `x86_64_gpu`).
 
 The tool was originally developed by Dr.-Ing. Marcus Grum.
 
-## Getting Started
+## Getting Started!
 
 ### 1) Set up operating system
 
