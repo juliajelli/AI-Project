@@ -1,0 +1,32 @@
+Bootstrap: docker
+From: nvidia/cuda:12.1.1-devel-ubuntu22.04
+
+%post
+    apt-get update && apt-get install -y \
+        python3 python3-pip python3-venv git wget \
+        && rm -rf /var/lib/apt/lists/*
+
+    ln -sf /usr/bin/python3 /usr/bin/python
+
+    pip3 install --no-cache-dir \
+        torch==2.2.2 \
+        tokenizers==0.21.1 \
+        transformers==4.51.0 \
+        datasets==2.20.0 \
+        accelerate==0.33.0 \
+        sentence-transformers==3.0.1 \
+        scikit-learn==1.5.1 \
+        numpy==1.26.4 \
+        wandb==0.17.7 \
+        sentencepiece==0.2.0 \
+        protobuf==5.27.3 \
+        tqdm
+
+%environment
+    export WANDB_MODE=offline
+    export HF_HUB_OFFLINE=1
+    export TRANSFORMERS_OFFLINE=1
+    export HF_DATASETS_OFFLINE=1
+
+%runscript
+    python "$@"
