@@ -1,4 +1,4 @@
-# Activation Data
+# Activation data
 
 **Owner:** Julia Jellinek and Keno Hanken 
 **Course:** M. Grum – Advanced AI-based Application Systems  

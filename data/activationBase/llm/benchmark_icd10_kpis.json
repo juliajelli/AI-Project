@@ -1,0 +1,20 @@
+{
+  "total_samples": 2034,
+  "correct": 243,
+  "incorrect": 1791,
+  "no_code_extracted": 13,
+  "top1_accuracy": 0.1195,
+  "macro_precision": 0.0616,
+  "macro_recall": 0.0856,
+  "macro_f1": 0.0681,
+  "weighted_f1": 0.095,
+  "micro_precision": 0.1195,
+  "micro_recall": 0.1195,
+  "micro_f1": 0.1195,
+  "balanced_accuracy": 0.1195,
+  "cohen_kappa": 0.1193,
+  "matthews_corrcoef": 0.1193,
+  "hamming_loss": 0.8805,
+  "block_accuracy": 0.5821,
+  "chapter_accuracy": 0.8038
+}

@@ -16,7 +16,6 @@ This image contains the trained AI model resulting from the fine-tuning process.
 The model is provided in serialized form and is intended to be used by the
 corresponding activationBase container for inference and evaluation tasks.
 
-
 ## License
 This project is released under the **GNU Affero General Public License v3.0 (AGPL-3.0)**.
 By using this image, you agree to comply with the terms and conditions of this license.
