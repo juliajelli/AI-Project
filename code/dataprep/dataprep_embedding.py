@@ -5,7 +5,7 @@ import re
 import unicodedata
 import pandas as pd
 
-df = pd.read_csv('MedSynth_huggingface_final.csv')
+df = pd.read_csv('AI-Project/code/dataprep/joint_data_collection.csv')
 
 # Harmonizing UTF characters
 def clean_string(s):
@@ -46,5 +46,5 @@ val_df  = g.nth(0).reset_index()
 val_df = val_df.drop(["index"], axis=1)
 
 # Export as JSON
-train_df.to_json("train/training_finetuning_embedding.json", orient="records")
-val_df.to_json("validation/validation_finetuning_embedding.json", orient="records")
+train_df.to_json("AI-Project/data/learningBase/embedding/training_finetuning_embedding.json", orient="records")
+val_df.to_json("AI-Project/data/learningBase/embedding/validation_finetuning_embedding.json", orient="records")

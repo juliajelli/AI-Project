@@ -1,21 +1,46 @@
 """
 Inference script: classify dialogues using the finetuned embedding model.
+
+Docker paths:
+  - Model directory: /tmp/knowledgeBase/embedding_model
+  - Validation data: /tmp/learningBase/validation/embedding/validation_finetuning_embedding.json
 """
 
 import argparse
+import csv
 import json
 import pickle
 import torch
+import torch.nn as nn
 import numpy as np
 from transformers import AutoTokenizer, AutoModel
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report, top_k_accuracy_score
-from finetune_embedding import EmbeddingClassifier
+
+
+class EmbeddingClassifier(nn.Module):
+    """Embedding model + classification head."""
+
+    def __init__(self, encoder, hidden_size, num_classes, dropout=0.1):
+        super().__init__()
+        self.encoder = encoder
+        self.dropout = nn.Dropout(dropout)
+        self.classifier = nn.Linear(hidden_size, num_classes)
+
+    def forward(self, input_ids, attention_mask):
+        outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
+        # Mean pooling over token embeddings
+        token_embeddings = outputs.last_hidden_state  # (B, seq_len, hidden)
+        mask_expanded = attention_mask.unsqueeze(-1).float()
+        embeddings = (token_embeddings * mask_expanded).sum(1) / mask_expanded.sum(1).clamp(min=1e-9)
+        embeddings = self.dropout(embeddings)
+        logits = self.classifier(embeddings)
+        return logits, embeddings
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_dir", type=str, required=True, help="Path to finetuned_model directory")
-    parser.add_argument("--input", type=str, default=None, help="JSON file with Dialogue entries or plain text file")
+    parser.add_argument("--input", type=str, default=None, help="JSON/CSV file with Dialogue entries or plain text file")
     parser.add_argument("--text", type=str, default=None, help="Direct dialogue text to classify")
     parser.add_argument("--top_k", type=int, default=5, help="Number of top predictions to show")
     parser.add_argument("--max_length", type=int, default=512)
@@ -53,7 +78,20 @@ def main():
                 ground_truth = [d["ICD10"] for d in data]
             else:
                 ground_truth = None
+        elif args.input.endswith(".csv"):
+            # CSV format: Note,Dialogue,ICD10,ICD10_desc
+            with open(args.input, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                data = list(reader)
+            if not data:
+                parser.error(f"CSV file {args.input} is empty.")
+            dialogues = [d["Dialogue"] for d in data]
+            if args.evaluate and "ICD10" in data[0]:
+                ground_truth = [d["ICD10"] for d in data]
+            else:
+                ground_truth = None
         else:
+            # Plain text file - one dialogue per line
             with open(args.input, "r", encoding="utf-8") as f:
                 dialogues = [line.strip() for line in f if line.strip()]
             ground_truth = None
@@ -61,7 +99,7 @@ def main():
         parser.error("Either --input or --text must be provided.")
 
     if args.evaluate and ground_truth is None:
-        parser.error("--evaluate requires a JSON --input file with 'ICD10' ground truth labels.")
+        parser.error("--evaluate requires a JSON/CSV --input file with 'ICD10' ground truth labels.")
 
     # Predict in batches
     all_probs = []

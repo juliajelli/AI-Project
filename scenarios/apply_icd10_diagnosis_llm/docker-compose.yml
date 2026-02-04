@@ -1,0 +1,81 @@
+# Docker Compose for ICD-10 Diagnosis LLM Inference
+#
+# This compose file sets up the environment for running inference with the
+# fine-tuned Ministral-3B LLM model for ICD-10 diagnosis prediction.
+#
+# Prerequisites:
+#   - Docker with GPU support (nvidia-docker)
+#   - External volume 'ai_system' must exist: docker volume create ai_system
+#   - Base Ministral-3B model must be available at /tmp/knowledgeBase/base_model
+#     (download separately due to size: huggingface-cli download mistralai/Ministral-3B-Instruct-2410)
+#
+# Usage:
+#   1. Start the data containers to populate the shared volume:
+#      docker-compose up learningbase activationbase knowledgebase codebase
+#   2. Run inference (requires GPU):
+#      docker-compose run --rm inference
+#
+# Note: Replace <DOCKER_HUB_USERNAME> with your actual Docker Hub username.
+
+version: '3.8'
+
+volumes:
+  ai_system:
+    external: true
+
+services:
+  # Data provider: Learning/Training data
+  learningbase:
+    image: <DOCKER_HUB_USERNAME>/learningbase_icd10_diagnosis:latest
+    volumes:
+      - ai_system:/tmp
+    command: ["sh", "-c", "cp -r /data/learningBase /tmp/"]
+
+  # Data provider: Activation/Test data
+  activationbase:
+    image: <DOCKER_HUB_USERNAME>/activationbase_icd10_diagnosis:latest
+    volumes:
+      - ai_system:/tmp
+    command: ["sh", "-c", "cp -r /data/activationBase /tmp/"]
+
+  # Model provider: Trained LoRA adapters
+  knowledgebase:
+    image: <DOCKER_HUB_USERNAME>/knowledgebase_icd10_diagnosis:latest
+    volumes:
+      - ai_system:/tmp
+    command: ["sh", "-c", "cp -r /data/knowledgeBase /tmp/"]
+
+  # Code provider: Inference scripts
+  codebase:
+    image: <DOCKER_HUB_USERNAME>/codebase_icd10_diagnosis:latest
+    volumes:
+      - ai_system:/tmp
+    command: ["sh", "-c", "cp -r /data/codeBase /tmp/"]
+
+  # Inference runtime (requires GPU)
+  inference:
+    image: nvcr.io/nvidia/pytorch:24.07-py3
+    volumes:
+      - ai_system:/tmp
+    depends_on:
+      - learningbase
+      - activationbase
+      - knowledgebase
+      - codebase
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - HF_HUB_OFFLINE=1
+      - TRANSFORMERS_OFFLINE=1
+    command: >
+      bash -c "
+        pip install transformers peft bitsandbytes accelerate &&
+        python /tmp/codeBase/llm/inference.py \
+          --model_dir /tmp/knowledgeBase/base_model \
+          --adapter_dir /tmp/knowledgeBase/llm_lora_adapter
+      "

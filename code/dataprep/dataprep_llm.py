@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import List, Dict
 import argparse
 
-df = pd.read_csv('MedSynth_huggingface_final.csv')
+df = pd.read_csv('joint_data_collection.csv')
 
 
 # Harmonizing UTF characters
@@ -102,5 +102,5 @@ def process_json_file(input_dataframe: object, output_file_name: str):
     pass
 
 
-process_json_file(train_df, "train/training_finetuning_llm.jsonl")
-process_json_file(val_df, "validation/validation_finetuning_llm.jsonl")
+process_json_file(train_df, "train/training_data_llm.jsonl")
+process_json_file(val_df, "validation/validation_data_llm.jsonl")

@@ -5,6 +5,10 @@
 
 # ignore ALL files in ANY directory named temp
 temp/ 
-code/logs
-code/experiments/logs
-code/messageClient/logs
+
+# Ignore tensor files
+images/knowledgeBase_icd10_diagnosis/*.safetensors
+images/embedding_model/encoder/*.safetensors
+
+# Ignore best_model.pt
+images/knowledgeBase_icd10_diagnosis/embedding_model/*.pt

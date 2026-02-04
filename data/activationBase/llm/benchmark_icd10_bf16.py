@@ -4,21 +4,28 @@ Benchmark the bf16 fine-tuned model on ICD-10 code prediction using the validati
 Loads every dialogue from the validation JSONL, runs inference, extracts the
 predicted ICD-10 code, and compares it against the ground-truth code.
 
+Docker paths:
+  - Base model: /tmp/knowledgeBase/base_model
+  - LoRA adapter: /tmp/knowledgeBase/llm_lora_adapter
+  - Validation data: /tmp/learningBase/validation/llm/validation_finetuning_llm.jsonl
+
 Outputs:
-  - Per-sample results CSV  (results_bf16/benchmark_icd10_results.csv)
+  - Per-sample results CSV  (<results_dir>/benchmark_icd10_results.csv)
   - Full classification report, confusion matrix, and aggregate metrics to
-    stdout and a text file   (results_bf16/benchmark_icd10_report.txt)
-  - JSON KPIs               (results_bf16/benchmark_icd10_kpis.json)
+    stdout and a text file   (<results_dir>/benchmark_icd10_report.txt)
+  - JSON KPIs               (<results_dir>/benchmark_icd10_kpis.json)
 """
 
 import os
 import re
 import json
 import csv
+import argparse
 import torch
 import torch.multiprocessing as mp
 import numpy as np
 from collections import Counter
+from typing import Optional, List, Dict, Tuple
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers.models.mistral.configuration_mistral import MistralConfig
 from transformers.models.auto.configuration_auto import CONFIG_MAPPING_NAMES, CONFIG_MAPPING
@@ -40,18 +47,16 @@ from sklearn.metrics import (
 )
 from tqdm import tqdm
 
-# ── config ──────────────────────────────────────────────────────────────────
-BASE_DIR = os.getenv("SLURM_SUBMIT_DIR", ".")
-MODEL_DIR = os.path.join(BASE_DIR, "model")
-ADAPTER_DIR = os.path.join(BASE_DIR, "output_bf16", "final_model")
-DATA_DIR = os.path.join(BASE_DIR, "data")
-VALIDATION_FILE = os.path.join(DATA_DIR, "validation_finetuning_llm.jsonl")
-RESULTS_DIR = os.path.join(BASE_DIR, "results_bf16")
+# ── default paths (Docker) ──────────────────────────────────────────────────
+DEFAULT_MODEL_DIR = os.environ.get("MODEL_DIR", "/tmp/knowledgeBase/base_model")
+DEFAULT_ADAPTER_DIR = os.environ.get("ADAPTER_DIR", "/tmp/knowledgeBase/llm_lora_adapter")
+DEFAULT_VALIDATION_FILE = os.environ.get(
+    "VALIDATION_FILE", "/tmp/learningBase/validation/llm/validation_finetuning_llm.jsonl"
+)
+DEFAULT_RESULTS_DIR = os.environ.get("RESULTS_DIR", "/tmp/results_bf16")
 
-os.makedirs(RESULTS_DIR, exist_ok=True)
-
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 # ── register custom model configs (same as inference.py) ────────────────────
 CONFIG_MAPPING_NAMES["ministral3"] = "MistralConfig"
@@ -62,14 +67,14 @@ MODEL_FOR_CAUSAL_LM_MAPPING._extra_content[Mistral3Config] = Mistral3ForConditio
 ICD10_PATTERN = re.compile(r"\*\*ICD-10 Code:\*\*\s*([A-Z][A-Z0-9]+)")
 
 
-def extract_icd10(text: str) -> str | None:
+def extract_icd10(text: str) -> Optional[str]:
     """Return the first ICD-10 code found in *text*, or None."""
     m = ICD10_PATTERN.search(text)
     return m.group(1) if m else None
 
 
 # ── load validation data ────────────────────────────────────────────────────
-def load_validation_entries(path: str) -> list[dict]:
+def load_validation_entries(path: str) -> List[Dict]:
     """Parse the multi-line-pretty-printed JSONL file into a list of entries.
 
     Works regardless of line-ending style by tracking brace depth line-by-line
@@ -112,20 +117,20 @@ def load_validation_entries(path: str) -> list[dict]:
 NUM_GPUS = torch.cuda.device_count() or 1
 
 
-def load_model_and_tokenizer(gpu_id: int = 0):
+def load_model_and_tokenizer(model_dir: str, adapter_dir: str, gpu_id: int = 0):
     """Load a model replica pinned to a specific GPU."""
     tokenizer = AutoTokenizer.from_pretrained(
-        MODEL_DIR, local_files_only=True, trust_remote_code=True, fix_mistral_regex=True
+        adapter_dir, local_files_only=True, trust_remote_code=True, fix_mistral_regex=True
     )
     model = AutoModelForCausalLM.from_pretrained(
-        MODEL_DIR,
+        model_dir,
         device_map={"": gpu_id},
         torch_dtype=torch.bfloat16,
         local_files_only=True,
         trust_remote_code=True,
         attn_implementation="flash_attention_2",
     )
-    model = PeftModel.from_pretrained(model, ADAPTER_DIR)
+    model = PeftModel.from_pretrained(model, adapter_dir)
     model.eval()
     return model, tokenizer
 
@@ -140,9 +145,15 @@ def generate_response(model, tokenizer, dialogue: str, max_new_tokens: int = 204
 
 
 # ── multi-GPU worker ────────────────────────────────────────────────────────
-def _worker(gpu_id: int, work_items: list[tuple[int, str, str]], result_queue: mp.Queue):
+def _worker(
+    gpu_id: int,
+    work_items: List[Tuple[int, str, str]],
+    result_queue: mp.Queue,
+    model_dir: str,
+    adapter_dir: str,
+):
     """Worker process: loads its own model on gpu_id, processes its shard."""
-    model, tokenizer = load_model_and_tokenizer(gpu_id)
+    model, tokenizer = load_model_and_tokenizer(model_dir, adapter_dir, gpu_id)
     for idx, dialogue, gt_code in work_items:
         pred_text = generate_response(model, tokenizer, dialogue)
         pred_code = extract_icd10(pred_text)
@@ -164,12 +175,34 @@ def icd10_block(code: str) -> str:
 
 # ── main benchmark ──────────────────────────────────────────────────────────
 def main():
+    parser = argparse.ArgumentParser(description="Benchmark LLM for ICD-10 diagnosis prediction")
+    parser.add_argument("--model_dir", type=str, default=DEFAULT_MODEL_DIR,
+                        help="Path to base model directory")
+    parser.add_argument("--adapter_dir", type=str, default=DEFAULT_ADAPTER_DIR,
+                        help="Path to LoRA adapter directory")
+    parser.add_argument("--validation_file", type=str, default=DEFAULT_VALIDATION_FILE,
+                        help="Path to validation JSONL file")
+    parser.add_argument("--results_dir", type=str, default=DEFAULT_RESULTS_DIR,
+                        help="Directory to save benchmark results")
+    parser.add_argument("--max_new_tokens", type=int, default=2048,
+                        help="Maximum tokens to generate per sample")
+    args = parser.parse_args()
+
+    # Create results directory
+    os.makedirs(args.results_dir, exist_ok=True)
+
+    print(f"Model directory:    {args.model_dir}")
+    print(f"Adapter directory:  {args.adapter_dir}")
+    print(f"Validation file:    {args.validation_file}")
+    print(f"Results directory:  {args.results_dir}")
+    print()
+
     print("Loading validation data …")
-    entries = load_validation_entries(VALIDATION_FILE)
+    entries = load_validation_entries(args.validation_file)
     print(f"  {len(entries)} entries loaded.")
 
     # Prepare work items: (index, dialogue, ground_truth_code)
-    work_items: list[tuple[int, str, str]] = []
+    work_items: List[Tuple[int, str, str]] = []
     skipped = 0
     for i, entry in enumerate(entries):
         msgs = entry["messages"]
@@ -189,7 +222,7 @@ def main():
     print(f"Using {num_gpus} GPU(s) for inference …")
 
     # Split work items into per-GPU shards (round-robin for balanced load)
-    shards: list[list[tuple[int, str, str]]] = [[] for _ in range(num_gpus)]
+    shards: List[List[Tuple[int, str, str]]] = [[] for _ in range(num_gpus)]
     for j, item in enumerate(work_items):
         shards[j % num_gpus].append(item)
 
@@ -198,12 +231,15 @@ def main():
     result_queue: mp.Queue = mp.Queue()
     processes = []
     for gpu_id in range(num_gpus):
-        p = mp.Process(target=_worker, args=(gpu_id, shards[gpu_id], result_queue))
+        p = mp.Process(
+            target=_worker,
+            args=(gpu_id, shards[gpu_id], result_queue, args.model_dir, args.adapter_dir),
+        )
         p.start()
         processes.append(p)
 
     # Collect results with a progress bar
-    results_by_idx: dict[int, tuple[str, str | None]] = {}
+    results_by_idx: Dict[int, Tuple[str, Optional[str]]] = {}
     done_count = 0
     with tqdm(total=len(work_items), desc="Benchmark (bf16)") as pbar:
         while done_count < num_gpus:
@@ -237,7 +273,7 @@ def main():
         })
 
     # ── save per-sample CSV ─────────────────────────────────────────────────
-    csv_path = os.path.join(RESULTS_DIR, "benchmark_icd10_results.csv")
+    csv_path = os.path.join(args.results_dir, "benchmark_icd10_results.csv")
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=rows[0].keys())
         writer.writeheader()
@@ -373,13 +409,13 @@ def main():
         "chapter_accuracy": round(chapter / n, 4),
     }
 
-    json_path = os.path.join(RESULTS_DIR, "benchmark_icd10_kpis.json")
+    json_path = os.path.join(args.results_dir, "benchmark_icd10_kpis.json")
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(kpi, f, indent=2)
     print(f"KPIs saved to {json_path}")
 
     # ── save report ──────────────────────────────────────────────────────
-    report_path = os.path.join(RESULTS_DIR, "benchmark_icd10_report.txt")
+    report_path = os.path.join(args.results_dir, "benchmark_icd10_report.txt")
     with open(report_path, "w", encoding="utf-8") as f:
         f.write("\n".join(report_lines))
     print(f"Full report saved to {report_path}")
