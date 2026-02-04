@@ -7,7 +7,8 @@
 temp/ 
 
 # Ignore tensor files
-images/knowledgeBase_icd10_diagnosis/*.safetensors
+images/knowledgeBase_icd10_diagnosis/embedding_model/encoder/*.safetensors
+images/knowledgeBase_icd10_diagnosis/llm_lora_adapter/*.safetensors
 images/embedding_model/encoder/*.safetensors
 
 # Ignore best_model.pt
