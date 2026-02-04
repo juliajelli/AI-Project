@@ -6,7 +6,7 @@
 # ignore ALL files in ANY directory named temp
 temp/ 
 
-# Ignore tensor files
+# Ignore tensor files due to file size
 images/knowledgeBase_icd10_diagnosis/embedding_model/encoder/*.safetensors
 images/knowledgeBase_icd10_diagnosis/llm_lora_adapter/*.safetensors
 images/embedding_model/encoder/*.safetensors
